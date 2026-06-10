@@ -26,6 +26,7 @@ const float DISK_GAIN     = 1.0000;  // accretion disk brightness
 const float DRIFT_SPEED   = 1.0000;   // how fast the hole floats around
 const float DISK_TILT     = 0.5000; // disk tilt, radians
 const float WORK_AREA     = 0.3400; // bottom screen fraction kept undistorted
+const float DILATION_MIN  = 0.1000; // animation time rate when the hole is fully grown (gravitational time dilation)
 
 // ------------------------------------------------------ pomodoro, self-contained --
 // Shaders have no memory between frames, so the schedule is anchored to the
@@ -37,6 +38,7 @@ const float WORK_AREA     = 0.3400; // bottom screen fraction kept undistorted
 const float WORK_PERIOD_MIN = 55.0000; // work minutes per cycle (growth phase)
 const float BREAK_MIN       = 5.0000; // break minutes per cycle (hole gone)
 const float IDLE_FADE_SEC   = 90.0000; // typing pause at which fading starts
+const float TIME_SCALE      = 1.0000; // TESTING: 1 = real wall-clock schedule; >1 fast-forwards growth via iTime (100 -> a full cycle in ~36 s). Set back to 1 for normal use.
 
 // ------------------------------------------------------------------- noise --
 float hash21(vec2 p) {
@@ -79,7 +81,6 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     vec2  res    = iResolution.xy;
     vec2  uv     = fragCoord / res;
     float aspect = res.x / res.y;
-    float t      = iTime * DRIFT_SPEED;
 
     // Ghostty's fragCoord y runs top-down; work in height-from-bottom
     float yUp = 1.0 - uv.y;
@@ -89,7 +90,11 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     // last minute, stay gone through the break phase
     float workSec  = WORK_PERIOD_MIN * 60.0;
     float cycleSec = workSec + BREAK_MIN * 60.0;
-    float phase    = mod(iDate.w, cycleSec);
+    // schedule rides the wall clock; for testing, TIME_SCALE adds extra
+    // progress via iTime (which always advances per frame), so e.g. 100 runs
+    // a full cycle in seconds without depending on how Ghostty steps iDate.w
+    float wall     = iDate.w + iTime * (TIME_SCALE - 1.0);
+    float phase    = mod(wall, cycleSec);
     float collapse = min(60.0, workSec * 0.15);  // scales down for short debug cycles
     float grow = clamp(phase / workSec, 0.0, 1.0)
                * (1.0 - smoothstep(workSec - collapse, workSec, phase));
@@ -108,6 +113,18 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     float sz     = mix(0.22, 1.0, I);      // starts small, grows toward break time
     float rh     = HOLE_RADIUS * sz;
     float thetaE = LENS_STRENGTH * sz;
+
+    // smooth animation runs off iTime (advances every frame); the wall clock
+    // above only drives the slow pomodoro envelope
+    float t = iTime * DRIFT_SPEED;
+
+    // ---- gravitational time dilation ----
+    // A heavier hole slows the clock locally: the accretion disk visibly winds
+    // down as the hole grows. dil multiplies the disk's orbital rate, falling
+    // from 1 toward DILATION_MIN as the hole reaches full mass. (Applied to the
+    // disk swirl below, not to the drift — scaling the drift frequency by a
+    // slowly-varying mass over an unbounded iTime would eventually stall it.)
+    float dil = mix(1.0, DILATION_MIN, I);
 
     // lazy Lissajous drift, vertically confined so the hole and its disk
     // stay above the work area at the bottom of the screen; bounds adapt to
@@ -167,7 +184,11 @@ void mainImage(out vec4 fragColor, in vec2 fragCoord) {
     if (band > 0.001) {
         float ang = atan(q.y, q.x);
         float kep = pow(rin / rd, 1.5);        // Keplerian: inner orbits faster
-        float swirlA = ang + rd * 22.0 - t * kep * 2.6;
+        // gravitational time dilation: clocks slow near the horizon, so the
+        // inner orbits appear to freeze (Schwarzschild-ish redshift), and the
+        // whole disk winds down via dil as the hole grows
+        float redshift = sqrt(clamp(1.0 - rh / rd, 0.04, 1.0));
+        float swirlA = ang + rd * 22.0 - t * kep * 2.6 * redshift * dil;
         float streaks = vnoise(vec2(rd * 70.0, swirlA * 3.0)) * 0.65 +
                         vnoise(vec2(rd * 24.0, swirlA * 1.5 + 7.0)) * 0.35;
         streaks = 0.35 + 0.9 * streaks * streaks;

@@ -26,6 +26,9 @@ background sky.
   streaks orbit faster), doppler beaming (approaching side bright and
   blue-white, receding side dim orange-red), and a faint circular halo
   standing in for the lensed image of the disk's far side.
+- **Gravitational time dilation** — clocks slow near the horizon, so the disk's
+  inner orbits visibly freeze (a Schwarzschild-ish redshift factor), and the
+  whole disk winds down as the hole grows heavier. Tunable via `DILATION_MIN`.
 - The hole drifts on a slow Lissajous path, confined to the upper part of
   the screen — the bottom `WORK_AREA` fraction (your prompt) is never
   distorted. Drift speed and reach follow its size: small and calm, big
@@ -79,16 +82,20 @@ Constants at the top of `blackhole.glsl`:
 | `DRIFT_SPEED`     | How fast the hole floats around                         |
 | `DISK_TILT`       | Disk tilt in radians                                    |
 | `WORK_AREA`       | Bottom screen fraction kept completely undistorted      |
+| `DILATION_MIN`    | Disk's orbital time rate when the hole is fully grown (lower = more slowdown) |
 | `WORK_PERIOD_MIN` | Work minutes per pomodoro cycle (growth phase)          |
 | `BREAK_MIN`       | Break minutes per cycle (hole stays small)              |
 | `IDLE_FADE_SEC`   | Typing pause after which the hole starts to fade        |
+| `TIME_SCALE`      | Testing only: `1` = real schedule; `>1` fast-forwards growth via `iTime` |
 
 Edit and reload (`cmd+shift+,`), or use the bundled `tune.py` for
 interactive keyboard tuning with instant hot reload.
 
-The period knobs accept fractional minutes, which makes a fast debug loop:
-set `WORK_PERIOD_MIN = 0.33` and `BREAK_MIN = 0.08` to watch a complete
-pomodoro cycle — growth, collapse, break — in about 25 seconds.
+For a fast debug loop, set `TIME_SCALE` to e.g. `100` to watch a complete
+pomodoro cycle — growth, collapse, break — in about 36 seconds, then set it
+back to `1`. (It fast-forwards via `iTime` rather than the wall clock, so it
+works regardless of how Ghostty steps `iDate`.) The period knobs also accept
+fractional minutes if you'd rather shorten the real schedule itself.
 
 ## Uniforms Ghostty gives custom shaders (1.3)
 
