@@ -1,0 +1,4 @@
+recording.mov
+*.mov
+.DS_Store
+__pycache__/
