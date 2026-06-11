@@ -59,7 +59,7 @@ const float DILATION_MIN  = 0.2000; // disk pattern time rate at full size (grav
 const float TOKEN_AREA_MIN = 0.0100; // MODE_TOKENS: shadow area at 0% context, as a fraction of the terminal area
 const float TOKEN_AREA_MAX = 0.5000; // MODE_TOKENS: shadow area at 100% context. Looks bigger than it sounds: the bright disk reaches ~3x past the shadow radius, so 0.0313 already fills most of a screen height — and render cost scales with it.
 const float TOKEN_HOME_X  = 0.9600; // MODE_TOKENS: corner-home x in uv (1.0 = right edge)
-const float TOKEN_HOME_Y  = 0.2000; // MODE_TOKENS: corner-home y in uv (0.0 = screen top — Ghostty y runs top-down)
+const float TOKEN_HOME_Y  = 0.0400; // MODE_TOKENS: corner-home y in uv (0.0 = screen top — Ghostty y runs top-down)
 const float TOKEN_EASE    = 1.0000; // MODE_TOKENS: growth curve exponent; 1 = proportional, <1 front-loads growth, >1 back-loads it
 const float TOKEN_REACH   = 1.0000; // MODE_TOKENS: fraction of the playable screen the roam box covers at 100% context
 const float TOKEN_CALM    = 0.0400; // MODE_TOKENS: drift speed at 0% context (near-still seed)
