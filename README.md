@@ -1,14 +1,18 @@
-# Ghostty Blackhole
+# Ghostty Blackhole — Windows Terminal port
 
 ![Ghostty Blackhole demo](demo.gif)
 
 **Landing page:** [s13k.dev/blackhole](https://s13k.dev/blackhole/)
 
-A black hole floating inside your [Ghostty](https://ghostty.org) terminal. It
-starts small and grows to swallow your screen, driven by whichever **size mode**
-you pick: a built-in *pomodoro* clock (grow through the hour, demand a break,
-leave you alone once you take it), or *token mode*, where it tracks how full
-**Claude Code's context window** is in real time.
+A black hole floating inside your terminal. This fork adds a
+**[Windows Terminal](https://github.com/microsoft/terminal) port**
+(`blackhole.hlsl`) alongside the original Ghostty shader.
+
+The black hole starts small and grows to swallow your screen, driven by
+whichever **size mode** you pick: a built-in *pomodoro* clock (grow through
+the hour, demand a break, leave you alone once you take it), or *token mode*,
+where it tracks how full **Claude Code's context window** is in real time
+(Ghostty only — WT lacks the cursor-color uniforms token mode requires).
 
 Modeled on [Eric Bruneton's black hole shader](https://ebruneton.github.io/black_hole_shader/),
 which beam-traces Schwarzschild geodesics against precomputed lookup tables.
@@ -299,6 +303,51 @@ Three gotchas worth knowing if you hack on this:
 - Claude Code spawns statusLine/hook commands with **no controlling
   terminal**, so `/dev/tty` fails there — `claude-token.py` finds the
   session's pty by walking its ancestors with `ps -o ppid=,tty=`.
+
+## Windows Terminal port
+
+A **Windows Terminal** port (`blackhole.hlsl`) is included in this fork.
+It supports the same ray-traced black hole visuals and **pomodoro mode**,
+adapted to Windows Terminal's HLSL pixel shader interface.
+
+### Differences from the Ghostty original
+
+| Feature | Ghostty | Windows Terminal |
+|---------|---------|-----------------|
+| Shader language | GLSL | HLSL |
+| Token mode (cursor color) | Yes | No — WT has no cursor color uniforms |
+| Idle/typing detector | Yes (`iTimeCursorChange`) | No |
+| Wall-clock timing | Yes (`iDate.w`) | Uses `Time` (seconds since shader loaded) |
+| Demo mode | Yes | Yes |
+
+### Install
+
+1. Copy `blackhole.hlsl` to a permanent location.
+
+2. Edit Windows Terminal `settings.json` (`Ctrl+,` → "Open JSON file") and add
+   to your profile's `defaults`:
+
+   ```json
+   "profiles": {
+       "defaults": {
+           "experimental.pixelShaderPath": "C:\\path\\to\\blackhole.hlsl"
+       }
+   }
+   ```
+
+3. Save the file, then press `Ctrl+Shift+P` and select **"Toggle terminal
+   visual effects"** (or bind `toggleShaderEffects` in your keybindings).
+
+### Constants
+
+All tunables from the Ghostty version apply (see the
+[Constants](#constants) section above). Token-mode constants are unused.
+
+**Windows Terminal–specific notes:**
+
+- `TIME_SCALE` — set >1 to fast-forward the pomodoro cycle for testing
+  (e.g. 100 compresses a 45 min cycle to ~27 s)
+- `WORK_PERIOD_MIN` / `BREAK_MIN` — pomodoro cycle lengths (default 45/5 min)
 
 ## License
 
