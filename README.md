@@ -1,3 +1,7 @@
+<p align="center">
+  <a href="README.md">🇬🇧 English</a> | <a href="README.zh.md">🇨🇳 中文</a>
+</p>
+
 # Ghostty Blackhole — Windows Terminal Port
 
 ![Ghostty Blackhole demo](demo.gif)
