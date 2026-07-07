@@ -21,7 +21,7 @@
 
 // ---------------------------------------------------------------- tunables --
 // hole & lensing
-static const float HOLE_RADIUS   = 0.0200;
+static const float HOLE_RADIUS   = 0.2000;
 static const float LENS_DEPTH    = 13.0000;
 static const float STAR_GAIN     = 0.0000;
 // accretion disk geometry (radii in Schwarzschild radii)
