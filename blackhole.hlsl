@@ -21,7 +21,7 @@
 
 // ---------------------------------------------------------------- tunables --
 // hole & lensing
-static const float HOLE_RADIUS   = 0.2000;
+static const float HOLE_RADIUS   = 0.1200;
 static const float LENS_DEPTH    = 13.0000;
 static const float STAR_GAIN     = 0.0000;
 // accretion disk geometry (radii in Schwarzschild radii)
@@ -59,7 +59,7 @@ static const float DILATION_MIN  = 0.2000;
 // detector (Windows Terminal shaders have no cursor-activity uniform).
 static const float WORK_PERIOD_MIN = 45.0000;
 static const float BREAK_MIN       = 5.0000;
-static const float TIME_SCALE      = 1.0000;
+static const float TIME_SCALE      = 100.0000;
 
 // --------------------------------------------------------------- physics --
 #define B_CRIT 2.5980762
@@ -212,8 +212,8 @@ float4 main(float4 pos : SV_POSITION, float2 tex : TEXCOORD) : SV_TARGET {
         float grow = clamp(phase / workSec, 0.0, 1.0)
                    * (1.0 - smoothstep(workSec - collapse, workSec, phase));
 
-        I = lerp(0.12, 1.0, grow);
-        sz = lerp(0.22, 1.0, I);
+        I = lerp(0.04, 1.0, pow(grow, 0.5));
+        sz = lerp(0.037, 1.0, I);
 
         float ext = (rout / B_CRIT) * HOLE_RADIUS * sz;
         float yLo = WORK_AREA + 0.12 + ext;
