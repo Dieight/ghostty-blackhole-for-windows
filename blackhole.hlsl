@@ -59,7 +59,7 @@ static const float DILATION_MIN  = 0.2000;
 // detector (Windows Terminal shaders have no cursor-activity uniform).
 static const float WORK_PERIOD_MIN = 45.0000;
 static const float BREAK_MIN       = 5.0000;
-static const float TIME_SCALE      = 100.0000;
+static const float TIME_SCALE      = 10.0000;
 
 // --------------------------------------------------------------- physics --
 #define B_CRIT 2.5980762
@@ -206,11 +206,14 @@ float4 main(float4 pos : SV_POSITION, float2 tex : TEXCOORD) : SV_TARGET {
         float workSec  = WORK_PERIOD_MIN * 60.0;
         float cycleSec = workSec + BREAK_MIN * 60.0;
 
-        float wall     = Time * TIME_SCALE;
-        float phase    = wall - cycleSec * floor(wall / cycleSec);
+        float wall = Time * TIME_SCALE;
+        // No modulo — use absolute Time (terminal uptime / shader runtime).
+        // Toggle the shader off/on to restart the cycle.
         float collapse = min(60.0, workSec * 0.15);
-        float grow = clamp(phase / workSec, 0.0, 1.0)
-                   * (1.0 - smoothstep(workSec - collapse, workSec, phase));
+        float workPhase = min(wall, workSec);
+        float rawGrow = workPhase / workSec;
+        float shrink = 1.0 - smoothstep(workSec - collapse, workSec, wall);
+        float grow = max(rawGrow * shrink, 0.0);
 
         I = lerp(0.04, 1.0, pow(grow, 0.5));
         sz = lerp(0.037, 1.0, I);
