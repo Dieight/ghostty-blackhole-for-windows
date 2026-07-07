@@ -21,7 +21,7 @@
 
 // ---------------------------------------------------------------- tunables --
 // hole & lensing
-static const float HOLE_RADIUS   = 0.1200;
+static const float HOLE_RADIUS   = 0.0200;
 static const float LENS_DEPTH    = 13.0000;
 static const float STAR_GAIN     = 0.0000;
 // accretion disk geometry (radii in Schwarzschild radii)
@@ -43,6 +43,8 @@ static const float EXPOSURE      = 1.4000;
 static const float DRIFT_SPEED   = 1.0000;
 static const float WORK_AREA     = 0.3300;
 static const float DILATION_MIN  = 0.2000;
+static const float POMODORO_MAX_SCALE = 1.3000;
+static const float POMODORO_GROW_EASE = 0.4500;
 
 // geodesic integration steps per pixel
 #define N_STEPS 48
@@ -54,12 +56,12 @@ static const float DILATION_MIN  = 0.2000;
 
 // ------------------------------------------------------ pomodoro, self-contained --
 // The hole grows over each WORK_PERIOD_MIN, collapses as break time arrives,
-// and stays gone for BREAK_MIN. Unlike the Ghostty original, this uses Time
+// and stays small for BREAK_MIN. Unlike the Ghostty original, this uses Time
 // (seconds since shader loaded) rather than wall clock, and has no idle
 // detector (Windows Terminal shaders have no cursor-activity uniform).
 static const float WORK_PERIOD_MIN = 45.0000;
 static const float BREAK_MIN       = 5.0000;
-static const float TIME_SCALE      = 10.0000;
+static const float TIME_SCALE      = 1.0000;
 
 // --------------------------------------------------------------- physics --
 #define B_CRIT 2.5980762
@@ -149,13 +151,22 @@ float2 lissa(float t) {
 
 float3 blackbody(float T) {
     float t = clamp(T, 1500.0, 40000.0) / 100.0;
-    float r = t <= 66.0 ? 1.0
-                        : clamp(1.292936 * pow(t - 60.0, -0.1332047), 0.0, 1.0);
-    float g = t <= 66.0 ? clamp(0.3900816 * log(t) - 0.6318414, 0.0, 1.0)
-                        : clamp(1.1298909 * pow(t - 60.0, -0.0755148), 0.0, 1.0);
-    float b = t >= 66.0 ? 1.0
-                        : (t <= 19.0 ? 0.0
-                                     : clamp(0.5432068 * log(t - 10.0) - 1.1962540, 0.0, 1.0));
+    float r, g, b;
+    if (t <= 66.0) {
+        r = 1.0;
+        g = clamp(0.3900816 * log(t) - 0.6318414, 0.0, 1.0);
+    } else {
+        float warm = max(t - 60.0, 1e-4);
+        r = clamp(1.292936 * pow(warm, -0.1332047), 0.0, 1.0);
+        g = clamp(1.1298909 * pow(warm, -0.0755148), 0.0, 1.0);
+    }
+    if (t >= 66.0) {
+        b = 1.0;
+    } else if (t <= 19.0) {
+        b = 0.0;
+    } else {
+        b = clamp(0.5432068 * log(max(t - 10.0, 1e-4)) - 1.1962540, 0.0, 1.0);
+    }
     return float3(r, g, b);
 }
 
@@ -207,26 +218,29 @@ float4 main(float4 pos : SV_POSITION, float2 tex : TEXCOORD) : SV_TARGET {
         float cycleSec = workSec + BREAK_MIN * 60.0;
 
         float wall = Time * TIME_SCALE;
-        // No modulo — use absolute Time (terminal uptime / shader runtime).
-        // Toggle the shader off/on to restart the cycle.
+        float phase = wall - cycleSec * floor(wall / cycleSec);
         float collapse = min(60.0, workSec * 0.15);
-        float workPhase = min(wall, workSec);
-        float rawGrow = workPhase / workSec;
-        float shrink = 1.0 - smoothstep(workSec - collapse, workSec, wall);
-        float grow = max(rawGrow * shrink, 0.0);
+        float grow = clamp(phase / workSec, 0.0, 1.0)
+                   * (1.0 - smoothstep(workSec - collapse, workSec, phase));
 
-        I = lerp(0.04, 1.0, pow(grow, 0.5));
-        sz = lerp(0.037, 1.0, I);
+        I = lerp(0.12, 1.0, grow);
+        float visualGrow = pow(saturate(grow), POMODORO_GROW_EASE);
+        float baseSz = lerp(0.22, 1.0, lerp(0.12, 1.0, visualGrow));
+        sz = baseSz * lerp(1.0, POMODORO_MAX_SCALE, grow * grow);
 
         float ext = (rout / B_CRIT) * HOLE_RADIUS * sz;
         float yLo = WORK_AREA + 0.12 + ext;
         float yHi = max(yLo, 0.90 - ext);
         float spd = lerp(0.35, 1.0, I);
+        float yDrift = clamp(0.5 + (0.42 * sin(t * 0.157 + 2.0) + 0.08 * sin(t * 0.117)) * spd,
+                             0.0, 1.0);
         center = float2(
             0.5 + (0.24 * sin(t * 0.21) + 0.05 * sin(t * 0.083)) * spd,
-            1.0 - lerp(yLo, yHi, 0.5 + (0.42 * sin(t * 0.157 + 2.0) + 0.08 * sin(t * 0.117)) * spd));
+            1.0 - lerp(yLo, yHi, yDrift));
         center += I * float2(0.040 * sin(t * 0.83) + 0.020 * sin(t * 1.31),
                              0.030 * sin(t * 1.03 + 1.0));
+        float xMargin = min(ext / max(aspect, 1e-4), 0.45);
+        center = clamp(center, float2(xMargin, 1.0 - yHi), float2(1.0 - xMargin, 1.0 - yLo));
     } else {
         float lvl = min(fmod(Time, DEMO_SEC) / DEMO_GROW_SEC, 1.0);
         if (lvl < 0.0) { return shaderTexture.Sample(samplerState, uv); }
@@ -285,14 +299,14 @@ float4 main(float4 pos : SV_POSITION, float2 tex : TEXCOORD) : SV_TARGET {
                    * (1.29 * u + 0.07) * max(LENS_DEPTH - 2.14 * u + 0.75, 0.0)
                    * window * shield;
         float2 dir  = p / max(plen, 1e-5);
-        float3 term;
         float ab = 0.035 * smoothstep(1.0, 2.0, b / bmax);
-        for (int i = 0; i < 3; i++) {
-            float k   = 1.0 + (float(i) - 1.0) * ab;
-            float2 sp  = p - dir * defl * k;
-            float2 suv = mirrorUV(center + sp / float2(aspect, 1.0));
-            term[i]   = shaderTexture.Sample(samplerState, suv)[i];
-        }
+        float2 suvR = mirrorUV(center + (p - dir * defl * (1.0 - ab)) / float2(aspect, 1.0));
+        float2 suvG = mirrorUV(center + (p - dir * defl) / float2(aspect, 1.0));
+        float2 suvB = mirrorUV(center + (p - dir * defl * (1.0 + ab)) / float2(aspect, 1.0));
+        float3 term = float3(
+            shaderTexture.Sample(samplerState, suvR).r,
+            shaderTexture.Sample(samplerState, suvG).g,
+            shaderTexture.Sample(samplerState, suvB).b);
         float3 d = normalize(float3(-(pr / b) * (2.0 / b), -1.0));
         return float4(term + stars(d, Time) * L.star * window * shield, 1.0);
     }
