@@ -43,27 +43,34 @@ static const float EXPOSURE      = 1.4000;
 static const float DRIFT_SPEED   = 1.0000;
 static const float WORK_AREA     = 0.3300;
 static const float DILATION_MIN  = 0.2000;
-static const float MOTION_TIME_WRAP_SEC = 1000.0000;
-static const float MAX_SIZE_SCALE = 1.3000;
-static const float FIXED_SIZE_RATIO = 0.8000;
-static const float CONTEXT_GROW_EASE = 0.4500;
-static const bool  CONTEXT_DEBUG_BAR = false;
+static const float POMODORO_MAX_SCALE = 1.3000;
+static const float POMODORO_GROW_EASE = 0.4500;
+static const bool  POMODORO_DEBUG_BAR = true;
 
 // geodesic integration steps per pixel
 #define N_STEPS 48
 
 // ---------------------------------------------------------------- size mode --
-#define MODE_CONTEXT 0
-#define MODE_FIXED   1
-#define MODE_DEMO    2
-#define SIZE_MODE MODE_CONTEXT
+#define MODE_POMODORO 0
+#define MODE_DEMO     1
+#define SIZE_MODE MODE_POMODORO
 
-// ------------------------------------------------------ context-driven mode --
-// Windows Terminal shaders cannot see live chat state directly, so a helper
-// script watches the current Codex session log and rewrites CONTEXT_LEVEL from
-// the latest token_count event. The shader itself is stateless: more context
-// used means a larger hole.
-static const float CONTEXT_LEVEL = 0.0000;
+// ------------------------------------------------------ pomodoro, self-contained --
+// Windows Terminal currently exposes custom shader Time modulo 1000 seconds.
+// The shader-only timer therefore uses a 1000-second cycle: 15:00 work,
+// 1:40 rest. The rest window is centered on the WT wrap point so the wrap
+// cannot interrupt a visible growth segment.
+#define POMODORO_TIMER_SHADER_SHORT 0
+#define POMODORO_TIMER_EXTERNAL     1
+static const int   POMODORO_TIMER_MODE = POMODORO_TIMER_SHADER_SHORT;
+static const float POMODORO_WT_WRAP_SEC = 1000.0000;
+static const float POMODORO_SHADER_WORK_SEC = 900.0000;
+static const float POMODORO_SHADER_BREAK_SEC = 100.0000;
+static const float POMODORO_EXTERNAL_WORK_SEC = 2700.0000;
+static const float POMODORO_EXTERNAL_BREAK_SEC = 300.0000;
+static const float POMODORO_EXTERNAL_PHASE_SEC = 0.0000;
+static const float POMODORO_EXTERNAL_WT_TIME_SEC = 0.0000;
+static const float POMODORO_EXTERNAL_UPDATE_INTERVAL_SEC = 30.0000;
 
 // --------------------------------------------------------------- physics --
 #define B_CRIT 2.5980762
@@ -152,10 +159,6 @@ float2 lissa(float t) {
                   0.70 * sin(t * 0.54 + 2.1) + 0.30 * sin(t * 1.07));
 }
 
-float periodicSin(float t, float cycles, float phase) {
-    return sin(TAU * cycles * t / MOTION_TIME_WRAP_SEC + phase);
-}
-
 float3 blackbody(float T) {
     float t = clamp(T, 1500.0, 40000.0) / 100.0;
     float r, g, b;
@@ -191,14 +194,56 @@ float3 stars(float3 d, float t) {
     return tint * spark * tw * ((h - 0.92) / 0.08);
 }
 
-float contextLevel() {
-    return saturate(CONTEXT_LEVEL);
+float periodicSin(float t, float cycles, float phase) {
+    return sin(TAU * cycles * t / POMODORO_WT_WRAP_SEC + phase);
 }
 
-float4 contextDebugBar(float4 color, float2 uv, float level) {
-    if (!CONTEXT_DEBUG_BAR || SIZE_MODE != MODE_CONTEXT || uv.y > 0.018) return color;
+float wrappedDelta(float nowSec, float baseSec, float wrapSec) {
+    return wrapSec * frac((nowSec - baseSec) / wrapSec);
+}
+
+struct PomodoroTimer {
+    float cyclePhaseSec;
+    float workPhaseSec;
+    float workSec;
+    float breakSec;
+    float cycleSec;
+    float reloadAgeSec;
+};
+
+PomodoroTimer pomodoroTimer(float wtTimeSec) {
+    PomodoroTimer timer;
+    if (POMODORO_TIMER_MODE == POMODORO_TIMER_EXTERNAL) {
+        timer.workSec = POMODORO_EXTERNAL_WORK_SEC;
+        timer.breakSec = POMODORO_EXTERNAL_BREAK_SEC;
+        timer.cycleSec = timer.workSec + timer.breakSec;
+        timer.reloadAgeSec = wrappedDelta(wtTimeSec, POMODORO_EXTERNAL_WT_TIME_SEC, POMODORO_WT_WRAP_SEC);
+        timer.cyclePhaseSec = timer.cycleSec * frac((POMODORO_EXTERNAL_PHASE_SEC + timer.reloadAgeSec) / timer.cycleSec);
+        timer.workPhaseSec = (timer.cyclePhaseSec < timer.workSec) ? timer.cyclePhaseSec : -1.0;
+    } else {
+        timer.workSec = POMODORO_SHADER_WORK_SEC;
+        timer.breakSec = POMODORO_SHADER_BREAK_SEC;
+        timer.cycleSec = timer.workSec + timer.breakSec;
+        timer.reloadAgeSec = fmod(wtTimeSec, 60.0);
+        timer.cyclePhaseSec = fmod(wtTimeSec + timer.workSec, timer.cycleSec);
+        timer.workPhaseSec = (timer.cyclePhaseSec < timer.workSec) ? timer.cyclePhaseSec : -1.0;
+    }
+    return timer;
+}
+
+float4 pomodoroDebugBar(float4 color, float2 uv, float cycleNorm, float grow,
+                        float wtWrapNorm, float minuteNorm) {
+    if (!POMODORO_DEBUG_BAR || uv.y > 0.066) return color;
+
     float3 bar = float3(0.04, 0.04, 0.04);
-    if (uv.x <= saturate(level)) bar = float3(0.20, 0.85, 0.30);
+    if (uv.y <= 0.018) {
+        if (uv.x <= saturate(grow)) bar = float3(0.20, 0.85, 0.30);
+    } else if (uv.y >= 0.024 && uv.y <= 0.042) {
+        if (uv.x <= saturate(cycleNorm)) bar = float3(0.15, 0.35, 0.95);
+    } else if (uv.y >= 0.048) {
+        if (uv.x <= saturate(wtWrapNorm)) bar = float3(0.95, 0.18, 0.12);
+        if (uv.x <= saturate(minuteNorm)) bar = float3(0.10, 0.85, 0.95);
+    }
     return float4(lerp(color.rgb, bar, 0.85), color.a);
 }
 
@@ -217,54 +262,64 @@ float4 main(float4 pos : SV_POSITION, float2 tex : TEXCOORD) : SV_TARGET {
     float2 res    = Resolution.xy;
     float2 uv     = tex;
     float  aspect = res.x / res.y;
-    float  yUp    = 1.0 - uv.y;
 
-    float context = contextLevel();
-    float motionTime = MOTION_TIME_WRAP_SEC * frac(Time / MOTION_TIME_WRAP_SEC);
-    float t = (SIZE_MODE == MODE_DEMO || SIZE_MODE == MODE_FIXED)
-            ? Time * DRIFT_SPEED
-            : context * TAU * 12.0;
+    float yUp = 1.0 - uv.y;
+
+    float wtTime = POMODORO_WT_WRAP_SEC * frac(Time / POMODORO_WT_WRAP_SEC);
+    float shaderTime = wtTime;
+    float t = wtTime * DRIFT_SPEED;
 
     DiskLook L = LOOK_DEFAULT;
-    if (SIZE_MODE == MODE_DEMO) L = demoLook(Time);
+    if (SIZE_MODE == MODE_DEMO) L = demoLook(shaderTime);
 
     float rin  = max(L.inner, 1.6);
     float rout = max(L.outer, rin + 0.5);
 
     float I, sz;
     float2 center;
+    float debugPhaseNorm = 0.0;
+    float debugGrow = 0.0;
+    float debugWtWrapNorm = wtTime / POMODORO_WT_WRAP_SEC;
+    float debugReloadNorm = frac(wtTime / 60.0);
 
-    if (SIZE_MODE == MODE_CONTEXT || SIZE_MODE == MODE_FIXED) {
-        if (SIZE_MODE == MODE_FIXED) {
-            I = FIXED_SIZE_RATIO;
-            sz = MAX_SIZE_SCALE * FIXED_SIZE_RATIO;
-        } else {
-            float g = pow(context, CONTEXT_GROW_EASE);
-            I = lerp(0.12, 1.0, g);
-            float visualGrow = pow(saturate(g), CONTEXT_GROW_EASE);
-            float baseSz = lerp(0.22, 1.0, lerp(0.12, 1.0, visualGrow));
-            sz = baseSz * lerp(1.0, MAX_SIZE_SCALE, g * g);
-        }
+    if (SIZE_MODE == MODE_POMODORO) {
+        PomodoroTimer timer = pomodoroTimer(wtTime);
+        float workSec  = max(timer.workSec, 1.0);
+        float cycleSec = max(timer.cycleSec, workSec + 1.0);
+
+        float phase = timer.workPhaseSec;
+        float collapse = min(60.0, workSec * 0.15);
+        float growEnd = max(workSec - collapse, 1.0);
+        float growUp = saturate(phase / growEnd);
+        float shrink = 1.0 - smoothstep(growEnd, workSec, phase);
+        float grow = (phase >= 0.0) ? growUp * shrink : 0.0;
+        debugPhaseNorm = timer.cyclePhaseSec / cycleSec;
+        debugGrow = grow;
+        debugReloadNorm = (POMODORO_TIMER_MODE == POMODORO_TIMER_EXTERNAL)
+            ? saturate(timer.reloadAgeSec / max(POMODORO_EXTERNAL_UPDATE_INTERVAL_SEC, 1.0))
+            : frac(wtTime / 60.0);
+
+        I = lerp(0.12, 1.0, grow);
+        float visualGrow = pow(saturate(grow), POMODORO_GROW_EASE);
+        float baseSz = lerp(0.22, 1.0, lerp(0.12, 1.0, visualGrow));
+        sz = baseSz * lerp(1.0, POMODORO_MAX_SCALE, grow * grow);
 
         float ext = (rout / B_CRIT) * HOLE_RADIUS * sz;
         float yLo = WORK_AREA + 0.12 + ext;
         float yHi = max(yLo, 0.90 - ext);
         float spd = lerp(0.35, 1.0, I);
-        float yDrift = clamp(0.5 + (0.42 * periodicSin(motionTime, 25.0, 2.0)
-                           + 0.08 * periodicSin(motionTime, 19.0, 0.0)) * spd,
+        float yDrift = clamp(0.5 + (0.42 * periodicSin(wtTime, 25.0, 2.0) + 0.08 * periodicSin(wtTime, 19.0, 0.0)) * spd,
                              0.0, 1.0);
         center = float2(
-            0.5 + (0.24 * periodicSin(motionTime, 33.0, 0.0)
-                 + 0.05 * periodicSin(motionTime, 13.0, 0.0)) * spd,
+            0.5 + (0.24 * periodicSin(wtTime, 33.0, 0.0) + 0.05 * periodicSin(wtTime, 13.0, 0.0)) * spd,
             1.0 - lerp(yLo, yHi, yDrift));
-        center += I * float2(
-            0.040 * periodicSin(motionTime, 132.0, 0.0)
-          + 0.020 * periodicSin(motionTime, 209.0, 0.0),
-            0.030 * periodicSin(motionTime, 164.0, 1.0));
+        center += I * float2(0.040 * periodicSin(wtTime, 132.0, 0.0) + 0.020 * periodicSin(wtTime, 209.0, 0.0),
+                             0.030 * periodicSin(wtTime, 164.0, 1.0));
         float xMargin = min(ext / max(aspect, 1e-4), 0.45);
         center = clamp(center, float2(xMargin, 1.0 - yHi), float2(1.0 - xMargin, 1.0 - yLo));
     } else {
-        float lvl = min(fmod(Time, DEMO_SEC) / DEMO_GROW_SEC, 1.0);
+        float lvl = min(fmod(shaderTime, DEMO_SEC) / DEMO_GROW_SEC, 1.0);
+        if (lvl < 0.0) { return pomodoroDebugBar(shaderTexture.Sample(samplerState, uv), uv, debugPhaseNorm, debugGrow, debugWtWrapNorm, debugReloadNorm); }
         float g = pow(clamp(lvl, 0.0, 1.0), 1.0);
         I = lerp(0.10, 1.0, g);
 
@@ -292,11 +347,13 @@ float4 main(float4 pos : SV_POSITION, float2 tex : TEXCOORD) : SV_TARGET {
 
     float vis = smoothstep(0.0, 0.10, I);
     if (vis <= 0.0) {
-        return contextDebugBar(shaderTexture.Sample(samplerState, uv), uv, context);
+        return pomodoroDebugBar(shaderTexture.Sample(samplerState, uv), uv, debugPhaseNorm, debugGrow, debugWtWrapNorm, debugReloadNorm);
     }
 
     float rh = HOLE_RADIUS * sz;
+
     float dil = lerp(1.0, DILATION_MIN, I);
+
     float shield = vis * smoothstep(WORK_AREA, WORK_AREA + 0.18, yUp);
 
     float2  p    = (uv - center) * float2(aspect, 1.0);
@@ -311,6 +368,7 @@ float4 main(float4 pos : SV_POSITION, float2 tex : TEXCOORD) : SV_TARGET {
     float bmax = rout + 3.0;
     float Z0   = max(14.0, rout + 5.0);
 
+    // ================= far field: analytic weak deflection ==================
     if (b >= bmax) {
         float u    = Z0 * rsqrt(Z0 * Z0 + b * b);
         float defl = (2.0 / (W * W)) / max(plen, 1e-4)
@@ -326,9 +384,10 @@ float4 main(float4 pos : SV_POSITION, float2 tex : TEXCOORD) : SV_TARGET {
             shaderTexture.Sample(samplerState, suvG).g,
             shaderTexture.Sample(samplerState, suvB).b);
         float3 d = normalize(float3(-(pr / b) * (2.0 / b), -1.0));
-        return contextDebugBar(float4(term + stars(d, t) * L.star * window * shield, 1.0), uv, context);
+        return pomodoroDebugBar(float4(term + stars(d, shaderTime) * L.star * window * shield, 1.0), uv, debugPhaseNorm, debugGrow, debugWtWrapNorm, debugReloadNorm);
     }
 
+    // ====================== near field: trace the geodesic ==================
     float3  x  = float3(pr, Z0);
     float3  v  = float3(0.0, 0.0, -1.0);
     float h2 = dot(pr, pr);
@@ -401,7 +460,7 @@ float4 main(float4 pos : SV_POSITION, float2 tex : TEXCOORD) : SV_TARGET {
     float3 bg = float3(0.0, 0.0, 0.0);
     if (!captured) {
         float3 d = normalize(v);
-        bg += stars(d, t) * L.star * window * shield;
+        bg += stars(d, shaderTime) * L.star * window * shield;
         if (d.z < -0.05) {
             float tpl = (-LENS_DEPTH - x.z) / d.z;
             float3 hp  = x + d * tpl;
@@ -414,5 +473,5 @@ float4 main(float4 pos : SV_POSITION, float2 tex : TEXCOORD) : SV_TARGET {
     }
 
     float3 col = bg * trans + (float3(1.0, 1.0, 1.0) - exp(-emitc * L.expo));
-    return contextDebugBar(float4(col, 1.0), uv, context);
+    return pomodoroDebugBar(float4(col, 1.0), uv, debugPhaseNorm, debugGrow, debugWtWrapNorm, debugReloadNorm);
 }

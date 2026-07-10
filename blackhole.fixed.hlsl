@@ -56,7 +56,7 @@ static const bool  CONTEXT_DEBUG_BAR = false;
 #define MODE_CONTEXT 0
 #define MODE_FIXED   1
 #define MODE_DEMO    2
-#define SIZE_MODE MODE_CONTEXT
+#define SIZE_MODE MODE_FIXED
 
 // ------------------------------------------------------ context-driven mode --
 // Windows Terminal shaders cannot see live chat state directly, so a helper
